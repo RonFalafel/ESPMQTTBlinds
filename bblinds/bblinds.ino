@@ -1,5 +1,8 @@
 #include <Stepper.h>
 #include <EspMQTTClient.h>
+#include <ezButton.h>
+
+ezButton limitSwitch(15);  // create ezButton object that attach to pin 7;
 
 EspMQTTClient client(
   "Froot",
@@ -12,6 +15,7 @@ EspMQTTClient client(
 );
 
 const int stepsPerRevolution = 2048;  // The number of steps per revolution
+int position = 2048*7;
 
 // ULN2003 Motor Driver Pins
 #define IN1 4
@@ -34,28 +38,66 @@ void setup() {
   client.enableOTA();                                                         // Enable OTA (Over The Air) updates. Password defaults to MQTTPassword. Port is the default OTA port. Can be overridden with enableOTA("password", port).
   client.enableLastWillMessage("TestClient/lastwill", "I am going offline");  // You can activate the retain flag by setting the third parameter to true
 
+  limitSwitch.setDebounceTime(50);
 }
 
 void loop() {
   client.loop();
 
-  
+  limitSwitch.loop(); // MUST call the loop() function first
+
+  if(limitSwitch.isPressed())
+    Serial.println("The limit switch: UNTOUCHED -> TOUCHED");
+
+  if(limitSwitch.isReleased())
+    Serial.println("The limit switch: TOUCHED -> UNTOUCHED");
+
+  // int state = limitSwitch.getState();
+  // if(state == HIGH)
+  //   Serial.println("The limit switch: UNTOUCHED");
+  // else
+  //   Serial.println("The limit switch: TOUCHED");
 }
 
 // This function is called once everything is connected (Wifi and MQTT)
 void onConnectionEstablished() {
   client.subscribe("blinds/open", openBlinds);
   client.subscribe("blinds/close", closeBlinds);
+  client.subscribe("blinds/slow", setSpeedSlow);
+  client.subscribe("blinds/default", setSpeedDefault);
+  client.subscribe("blinds/fast", setSpeedFast);
 }
 
 void openBlinds(const String& topic, const String& message) {
-  // step two revolutions in one direction:
+  // Amount of revolutions to fully open: myStepper.step(-stepsPerRevolution*7);
   Serial.println("clockwise");
-  myStepper.step(stepsPerRevolution*2);
+  while (position <= stepsPerRevolution * 7) {
+    client.loop();
+    myStepper.step(-stepsPerRevolution/64);
+    position += stepsPerRevolution/64;
+  }
 }
 
 void closeBlinds(const String& topic, const String& message) {
   // step two revolutions in the other direction:
   Serial.println("counterclockwise");
-  myStepper.step(-stepsPerRevolution*2);
+  while (limitSwitch.getState() == HIGH) {
+    limitSwitch.loop();
+    client.loop();
+    myStepper.step(stepsPerRevolution/64);
+  }
+
+  position = 0;
+}
+
+void setSpeedSlow(const String& topic, const String& message) {
+  myStepper.setSpeed(1);
+}
+
+void setSpeedDefault(const String& topic, const String& message) {
+  myStepper.setSpeed(5);
+}
+
+void setSpeedFast(const String& topic, const String& message) {
+  myStepper.setSpeed(10);
 }
